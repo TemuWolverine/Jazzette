@@ -1,6 +1,6 @@
 # Jazzette Player
 > [!WARNING]  
-> *This is work in progress**.  
+> **This is work in progress**.  
 > I am using this readme as a bit of a scratchpad of parts. Don't assume they're the final parts until this announcement is removed.  
 > **This is work in progress**.
 
