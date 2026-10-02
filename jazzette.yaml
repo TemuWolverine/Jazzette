@@ -1,0 +1,471 @@
+substitutions:
+  startup_sound_file: Home_Connected
+  media_sample_rate: 44100
+  
+  friendly_name: yeolderadio
+  device_name: yeolderadio
+
+  clk_pin: GPIO03
+  mosi_pin: GPIO04
+  dc_pin: GPIO02
+  cs_pin: GPIO01
+  rst_pin: GPIO05
+
+  btna_pin: GPIO07
+  btnb_pin: GPIO08
+  btnc_pin: GPIO09
+  btnd_pin: GPIO10
+
+  mtr_a: GPIO41
+  mtr_b: GPIO42
+  mtr_slp: GPIO45
+
+  nfc_sda: GPIO18
+  nfc_scl: GPIO17
+
+  headphone_ws: GPIO48
+  headphone_bck: GPIO37
+  headphone_din: GPIO38
+  
+  toslink_din: GPIO40
+  coax_din: GPIO21
+
+  threewayswitcha: GPIO13
+  threewayswitchb: GPIO14
+packages:
+  esphome_templates:
+    url: https://github.com/TemuWolverine/esphome_templates
+    ref: main
+    refresh: 1s
+    files:
+      - esphome_boilerplate.yaml
+      - boards/esp32_s3_nano.yaml
+        
+esphome:
+  name: esphome-web-fc09d0
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: update_selector
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+# Allow Over-The-Air updates
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+globals:
+  - id: selector_state
+    type: int
+    restore_value: no
+    initial_value: '1'
+  
+font:
+    # gfonts://family[@weight]
+  - file: "gfonts://Roboto"
+    id: myfont
+    size: 20
+  - file: "gfonts://Roboto"
+    id: font_title
+    size: 14
+
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 9
+
+spi:
+  clk_pin: ${clk_pin}
+  mosi_pin: ${mosi_pin}
+  
+display:
+  - platform: ssd1322_spi
+    model: "SSD1322 256x64"
+    reset_pin: ${rst_pin}
+    cs_pin: ${cs_pin}
+    dc_pin: ${dc_pin}
+    lambda: |-
+            // Example data for now
+            std::string title  = "The Piano Has Been Drinking (Not Me)";
+            std::string artist = "Tom Waits";
+            std::string album  = "Small Change";
+      
+            int elapsed = 102;   // seconds
+            int duration = 220;  // seconds
+      
+            // Track title
+            it.print(0, 0, id(font_title), title.c_str());
+      
+            // Artist
+            it.print(0, 17, id(font_small), artist.c_str());
+      
+            // Album
+            //it.print(0, 29, id(font_small), album.c_str());
+      
+            // Progress bar
+            const int bar_x = 0;
+            const int bar_y = 44;
+            const int bar_w = 256;
+            const int bar_h = 5;
+      
+            it.rectangle(bar_x, bar_y, bar_w, bar_h);
+      
+            float progress = 0.0f;
+      
+            if (duration > 0) {
+              progress = (float) elapsed / (float) duration;
+            }
+      
+            int progress_w = (int)((bar_w - 2) * progress);
+      
+            it.filled_rectangle(
+              bar_x + 1,
+              bar_y + 1,
+              progress_w,
+              bar_h - 2
+            );
+      
+            // Convert times to mm:ss
+            int elapsed_min = elapsed / 60;
+            int elapsed_sec = elapsed % 60;
+      
+            int duration_min = duration / 60;
+            int duration_sec = duration % 60;
+      
+            char elapsed_text[8];
+            char duration_text[8];
+      
+            snprintf(
+              elapsed_text,
+              sizeof(elapsed_text),
+              "%d:%02d",
+              elapsed_min,
+              elapsed_sec
+            );
+      
+            snprintf(
+              duration_text,
+              sizeof(duration_text),
+              "%d:%02d",
+              duration_min,
+              duration_sec
+            );
+      
+            // Time
+            it.print(
+              0,
+              52,
+              id(font_small),
+              elapsed_text
+            );
+      
+            it.print(
+              256,
+              52,
+              id(font_small),
+              TextAlign::TOP_RIGHT,
+              duration_text
+            );
+output:
+- platform: ledc
+  id: motor_enable
+  pin: ${mtr_slp}
+  
+- platform: ledc
+  id: motor_forward_pin
+  pin: ${mtr_a}
+  
+- platform: ledc
+  id: motor_reverse_pin
+  pin: ${mtr_b}
+ 
+fan:
+  - platform: hbridge
+    id: my_fan
+    name: "Living Room Fan"
+    pin_a: motor_forward_pin #${motor_forward_pin}
+    pin_b: motor_reverse_pin
+    enable_pin: motor_enable
+    decay_mode: slow   # slow decay mode (coasting) or fast decay (braking).      
+
+i2c:
+  sda: ${nfc_sda}
+  scl: ${nfc_scl}
+
+pn532_i2c:
+  update_interval: 1s
+  on_tag:
+    then:
+    - text_sensor.template.publish:
+        id: rfid_tag
+        state: !lambda 'return x;'
+#    - fan.toggle: my_fan
+
+binary_sensor:
+  - platform: pn532
+    uid: 74-10-37-94
+    name: "PN532 NFC Tag"
+
+  - platform: gpio
+    id: button_a
+    name: "Button A"
+    pin:
+      number: ${btna_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on_off: 20ms
+    on_click:
+      then:
+        - homeassistant.event:
+            event: esphome.button_click
+            data:
+              button: a
+
+  - platform: gpio
+    id: button_b
+    name: "Button B"
+    pin:
+      number: ${btnb_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on_off: 20ms
+    on_click:
+      then:
+        - homeassistant.event:
+            event: esphome.button_click
+            data:
+              button: b
+
+  - platform: gpio
+    id: button_c
+    name: "Button C"
+    pin:
+      number: ${btnc_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on_off: 20ms
+    on_click:
+      then:
+        - homeassistant.event:
+            event: esphome.button_click
+            data:
+              button: c
+
+  - platform: gpio
+    id: button_d
+    name: "Button D"
+    pin:
+      number: ${btnd_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on_off: 20ms
+    on_click:
+      then:
+        - homeassistant.event:
+            event: esphome.button_click
+            data:
+              button: d
+
+  - platform: gpio
+    id: selector_a
+    pin:
+      number: ${threewayswitcha}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on_off: 20ms
+    on_state:
+      then:
+        - script.execute: update_selector
+
+  - platform: gpio
+    id: selector_b
+    pin:
+      number: ${threewayswitchb}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on_off: 20ms
+    on_state:
+      then:
+        - script.execute: update_selector
+
+# Sendspin audio hub
+sendspin:
+
+# I2S Audio buses (ESP32-S3 supports 2 hardware I2S controllers)
+i2s_audio:
+  - id: i2s_headphone
+    i2s_lrclk_pin: ${headphone_ws}
+    i2s_bclk_pin: ${headphone_bck}
+  - id: i2s_spdif
+
+# Speaker outputs
+speaker:
+  - platform: i2s_audio
+    id: speaker_headphone
+    dac_type: external
+    i2s_audio_id: i2s_headphone
+    i2s_dout_pin: ${headphone_din}
+    sample_rate: 44100
+    channel: stereo
+
+  - platform: i2s_audio
+    id: speaker_spdif
+    dac_type: external
+    i2s_audio_id: i2s_spdif
+    i2s_dout_pin: ${toslink_din}
+    spdif_mode: true
+    sample_rate: 44100
+    channel: stereo
+    use_apll: true
+    i2s_mode: primary
+    i2s_comm_fmt: stand_i2s
+    mclk_multiple: 256
+
+  # Router to switch between SPDIF and Headphone
+  - platform: router
+    id: audio_router
+    output_speakers:
+      - speaker_spdif
+      - speaker_headphone
+    sample_rate: 44100
+    num_channels: 2
+    bits_per_sample: 16
+
+# Media source from SendSpin
+media_source:
+  - platform: sendspin
+    id: sendspin_source
+
+# Media players
+media_player:
+  - platform: speaker_source
+    id: sendspin_media_player
+    name: "SendSpin Media Player"
+    media_pipeline:
+      speaker: audio_router
+      sources:
+        - sendspin_source
+
+  - platform: sendspin
+    name: "SendSpin Group"
+
+text_sensor:
+  - platform: template
+    name: "RFID Tag"
+    id: rfid_tag
+    
+  - platform: template
+    name: "Selector Position"
+    id: selector_position
+
+script:
+  - id: update_selector
+    mode: restart
+    then:
+      - delay: 10ms
+      - lambda: |-
+          bool a = id(selector_a).state;
+          bool b = id(selector_b).state;
+
+          if (a && !b) {
+            id(selector_state) = 0;
+            id(selector_position).publish_state("0");
+          } else if (!a && !b) {
+            id(selector_state) = 1;
+            id(selector_position).publish_state("1");
+          } else if (!a && b) {
+            id(selector_state) = 2;
+            id(selector_position).publish_state("2");
+          } else {
+            id(selector_state) = -1;
+            id(selector_position).publish_state("Invalid");
+          }
+      - if:
+          condition:
+            lambda: 'return id(selector_state) == 0;'
+          then:
+            - fan.turn_on:
+                id: my_fan
+                direction: REVERSE
+            - router.speaker.switch_output:
+                id: audio_router
+                target_speaker: speaker_spdif
+            - lambda: |-
+                #include <driver/gpio.h>
+                #include <esp_rom_gpio.h>
+                #include <soc/gpio_sig_map.h>
+                // Enable TOSLINK (GPIO40), disable COAX (GPIO21)
+                gpio_set_direction(GPIO_NUM_40, GPIO_MODE_OUTPUT);
+                gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+                esp_rom_gpio_connect_out_signal(40, I2S1O_SD_OUT_IDX, false, false);
+                esp_rom_gpio_connect_out_signal(21, SIG_GPIO_OUT_IDX, false, false);
+                gpio_set_level(GPIO_NUM_21, 0);
+      - if:
+          condition:
+            lambda: 'return id(selector_state) == 1 || id(selector_state) == -1;'
+          then:
+            - fan.turn_off:
+                id: my_fan
+            - if:
+                condition:
+                  lambda: 'return id(selector_state) == 1;'
+                then:
+                  - router.speaker.switch_output:
+                      id: audio_router
+                      target_speaker: speaker_spdif
+                  - lambda: |-
+                      #include <driver/gpio.h>
+                      #include <esp_rom_gpio.h>
+                      #include <soc/gpio_sig_map.h>
+                      // Mirror S/PDIF signal to COAX (GPIO21), disable TOSLINK (GPIO40)
+                      gpio_set_direction(GPIO_NUM_40, GPIO_MODE_OUTPUT);
+                      gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+                      esp_rom_gpio_connect_out_signal(21, I2S1O_SD_OUT_IDX, false, false);
+                      esp_rom_gpio_connect_out_signal(40, SIG_GPIO_OUT_IDX, false, false);
+                      gpio_set_level(GPIO_NUM_40, 0);
+      - if:
+          condition:
+            lambda: 'return id(selector_state) == 2;'
+          then:
+            - fan.turn_on:
+                id: my_fan
+                direction: FORWARD
+            - router.speaker.switch_output:
+                id: audio_router
+                target_speaker: speaker_headphone
+            - lambda: |-
+                #include <driver/gpio.h>
+                #include <esp_rom_gpio.h>
+                #include <soc/gpio_sig_map.h>
+                // Disable S/PDIF GPIO outputs when in headphone mode
+                gpio_set_direction(GPIO_NUM_40, GPIO_MODE_OUTPUT);
+                gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+                esp_rom_gpio_connect_out_signal(40, SIG_GPIO_OUT_IDX, false, false);
+                esp_rom_gpio_connect_out_signal(21, SIG_GPIO_OUT_IDX, false, false);
+                gpio_set_level(GPIO_NUM_40, 0);
+                gpio_set_level(GPIO_NUM_21, 0);
