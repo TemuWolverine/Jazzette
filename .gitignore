@@ -44,3 +44,7 @@ circuit/EASYEDA_MODELS/
 circuit/**/*.csv
 PCB/production/
 PCB/Mainboard/production/
+
+# ESPHome
+.esphome/
+secrets.yaml

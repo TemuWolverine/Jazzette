@@ -1,0 +1,89 @@
+alias: "Jazzette NFC Media Player"
+description: "Replace queue with NFC tagged album or playlist in paused state, and pause when tag is removed"
+mode: restart
+trigger:
+  - platform: event
+    event_type: esphome.rfid_tag_scanned
+    id: tag_scanned
+  - platform: event
+    event_type: esphome.rfid_tag_removed
+    id: tag_removed
+action:
+  - choose:
+      # When a valid tag is detected: load the media (album, playlist, track, etc.) and pause it at the start
+      - conditions:
+          - condition: trigger
+            id: tag_scanned
+          - condition: template
+            value_template: "{{ '://' in trigger.event.data.uri }}"
+        sequence:
+          - variables:
+              raw_uri: "{{ trigger.event.data.uri }}"
+              clean_uri: >-
+                {% set raw = raw_uri.strip() %}
+                {% set parts = raw.split('/') %}
+                {% if raw.startswith('library://playlists/') or raw.startswith('library://playlist/') %}
+                  {% if parts | length >= 5 %}
+                    {% set provider = parts[3].split('--')[0] %}
+                    {{ provider }}://playlist/{{ parts[4:] | join('/') }}
+                  {% else %}
+                    library://playlist/{{ parts[3] }}
+                  {% endif %}
+                {% elif raw.startswith('library://albums/') or raw.startswith('library://album/') %}
+                  {% if parts | length >= 5 %}
+                    {% set provider = parts[3].split('--')[0] %}
+                    {{ provider }}://album/{{ parts[4:] | join('/') }}
+                  {% else %}
+                    library://album/{{ parts[3] }}
+                  {% endif %}
+                {% elif raw.startswith('library://tracks/') or raw.startswith('library://track/') %}
+                  {% if parts | length >= 5 %}
+                    {% set provider = parts[3].split('--')[0] %}
+                    {{ provider }}://track/{{ parts[4:] | join('/') }}
+                  {% else %}
+                    library://track/{{ parts[3] }}
+                  {% endif %}
+                {% elif raw.startswith('library://artists/') or raw.startswith('library://artist/') %}
+                  {% if parts | length >= 5 %}
+                    {% set provider = parts[3].split('--')[0] %}
+                    {{ provider }}://artist/{{ parts[4:] | join('/') }}
+                  {% else %}
+                    library://artist/{{ parts[3] }}
+                  {% endif %}
+                {% else %}
+                  {{ raw }}
+                {% endif %}
+          - action: music_assistant.play_media
+            target:
+              entity_id: media_player.jazzette  # CHANGE THIS TO YOUR MUSIC ASSISTANT MEDIA PLAYER ENTITY
+            data:
+              media_id: "{{ clean_uri }}"
+              media_type: >-
+                {% if 'playlist' in clean_uri %}
+                  playlist
+                {% elif 'album' in clean_uri %}
+                  album
+                {% elif 'track' in clean_uri %}
+                  track
+                {% elif 'artist' in clean_uri %}
+                  artist
+                {% elif 'radio' in clean_uri %}
+                  radio
+                {% else %}
+                  playlist
+                {% endif %}
+              enqueue: replace
+          - delay:
+              milliseconds: 250
+          - action: media_player.media_pause
+            target:
+              entity_id: media_player.jazzette
+
+      # When the tag is removed: pause playback immediately (like ejecting a cassette)
+      - conditions:
+          - condition: trigger
+            id: tag_removed
+        sequence:
+          - action: media_player.media_pause
+            target:
+              entity_id: media_player.jazzette
