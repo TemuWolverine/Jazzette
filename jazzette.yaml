@@ -43,10 +43,11 @@ packages:
         
 esphome:
   name_add_mac_suffix: false
-  on_boot:
-    priority: -100
-    then:
-      - script.execute: update_selector
+  # Hardware switch disabled:
+  # on_boot:
+  #   priority: -100
+  #   then:
+  #     - script.execute: update_selector
 
 # Enable logging
 logger:
@@ -349,6 +350,7 @@ pn532_i2c:
             ESP_LOGI("nfc", "Tag detected with UID: %s", x.c_str());
             id(rfid_tag).publish_state(x);
           }
+      - script.execute: update_tape_motor
   on_tag_removed:
     then:
       - lambda: |-
@@ -365,6 +367,7 @@ pn532_i2c:
             call.set_command(media_player::MEDIA_PLAYER_COMMAND_PAUSE);
             call.perform();
           }
+      - script.execute: update_tape_motor
       - if:
           condition:
             lambda: 'return !id(nfc_write_mode).state;'
@@ -391,6 +394,8 @@ binary_sensor:
       - delayed_on_off: 20ms
     on_press:
       then:
+        - lambda: |-
+            ESP_LOGI("button_a", "Button A physical press detected");
         - if:
             condition:
               lambda: 'return id(nfc_write_mode).state;'
@@ -404,7 +409,7 @@ binary_sensor:
         - script.stop: check_ab_hold
     on_multi_click:
       - timing:
-          - ON for at most 350ms
+          - ON for at most 800ms
           - OFF for at least 250ms
         then:
           - if:
@@ -420,10 +425,13 @@ binary_sensor:
                     event: esphome.button_click
                     data:
                       button: a
+              else:
+                - lambda: |-
+                    ESP_LOGW("button_a", "Click ignored: NFC Write Mode is active!");
       - timing:
-          - ON for at most 350ms
-          - OFF for at most 350ms
-          - ON for at most 350ms
+          - ON for at most 600ms
+          - OFF for at most 400ms
+          - ON for at most 600ms
         then:
           - if:
               condition:
@@ -507,45 +515,69 @@ binary_sensor:
       inverted: true
     filters:
       - delayed_on_off: 20ms
-    on_click:
-      then:
-        - lambda: |-
-            ESP_LOGI("button_d", "Volume Down");
-            auto call = id(sendspin_media_player).make_call();
-            call.set_command(media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN);
-            call.perform();
-        - homeassistant.event:
-            event: esphome.button_click
-            data:
-              button: d
+    on_multi_click:
+      - timing:
+          - ON for at most 800ms
+          - OFF for at least 300ms
+        then:
+          - lambda: |-
+              ESP_LOGI("button_d", "Single click: Volume Down");
+              auto call = id(sendspin_media_player).make_call();
+              call.set_command(media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN);
+              call.perform();
+          - homeassistant.event:
+              event: esphome.button_click
+              data:
+                button: d
+      - timing:
+          - ON for at most 600ms
+          - OFF for at most 400ms
+          - ON for at most 600ms
+        then:
+          - lambda: |-
+              int current = id(selector_state);
+              int next_mode = (current >= 0 && current < 2) ? (current + 1) : 0;
+              const char* names[] = {"TOSLINK SPDIF", "Coaxial SPDIF", "Headphones"};
+              ESP_LOGI("button_d", "Double click: Cycling audio output to %s (%d)", names[next_mode], next_mode);
+              id(switch_audio_output).execute(next_mode);
+          - homeassistant.event:
+              event: esphome.button_click
+              data:
+                button: d
+                action: double_click
 
-  - platform: gpio
-    id: selector_a
-    pin:
-      number: ${threewayswitcha}
-      mode:
-        input: true
-        pullup: true
-      inverted: true
-    filters:
-      - delayed_on_off: 20ms
-    on_state:
-      then:
-        - script.execute: update_selector
-
-  - platform: gpio
-    id: selector_b
-    pin:
-      number: ${threewayswitchb}
-      mode:
-        input: true
-        pullup: true
-      inverted: true
-    filters:
-      - delayed_on_off: 20ms
-    on_state:
-      then:
-        - script.execute: update_selector
+# Hardware switch inputs disabled:
+#  - platform: gpio
+#    id: selector_a
+#    name: "Selector A (GPIO13)"
+#    entity_category: diagnostic
+#    pin:
+#      number: ${threewayswitcha}
+#      mode:
+#        input: true
+#        pullup: true
+#      inverted: true
+#    filters:
+#      - delayed_on_off: 20ms
+#    on_state:
+#      then:
+#        - script.execute: update_selector
+#
+#  - platform: gpio
+#    id: selector_b
+#    name: "Selector B (GPIO14)"
+#    entity_category: diagnostic
+#    pin:
+#      number: ${threewayswitchb}
+#      mode:
+#        input: true
+#        pullup: true
+#      inverted: true
+#    filters:
+#      - delayed_on_off: 20ms
+#    on_state:
+#      then:
+#        - script.execute: update_selector
 
 # NFC Tag Writing Entities for Home Assistant
 switch:
@@ -693,6 +725,12 @@ media_player:
                   ESP_LOGD("volume", "Saved toslink volume: %.2f", vol);
                 }
               }
+            }
+            static media_player::MediaPlayerState prev_state = media_player::MEDIA_PLAYER_STATE_NONE;
+            auto current_state = id(sendspin_media_player).state;
+            if (current_state != prev_state) {
+              prev_state = current_state;
+              id(update_tape_motor).execute();
             }
 
   - platform: sendspin
@@ -864,23 +902,49 @@ script:
       - lambda: |-
           id(is_switching_output) = false;
 
-  - id: update_selector
+# Hardware switch script disabled:
+#  - id: update_selector
+#    mode: restart
+#    then:
+#      - delay: 10ms
+#      - lambda: |-
+#          bool a = id(selector_a).state;
+#          bool b = id(selector_b).state;
+#
+#          ESP_LOGI("selector", "Raw switch inputs: selector_a (GPIO13)=%s, selector_b (GPIO14)=%s",
+#                   a ? "ON (GND)" : "OFF (HIGH)",
+#                   b ? "ON (GND)" : "OFF (HIGH)");
+#
+#          int mode = -1;
+#          if (a && !b) {
+#            mode = 0; // TOSLINK SPDIF
+#          } else if (!a && !b) {
+#            mode = 1; // Coaxial SPDIF
+#          } else if (!a && b) {
+#            mode = 2; // Headphones
+#          } else {
+#            ESP_LOGW("selector", "Both selector pins are grounded! Check wiring for shorts.");
+#          }
+#
+#          if (mode != -1 && mode != id(selector_state)) {
+#            id(switch_audio_output).execute(mode);
+#          }
+
+  - id: update_tape_motor
     mode: restart
     then:
-      - delay: 10ms
-      - lambda: |-
-          bool a = id(selector_a).state;
-          bool b = id(selector_b).state;
-
-          int mode = -1;
-          if (a && !b) {
-            mode = 0;
-          } else if (!a && !b) {
-            mode = 1;
-          } else if (!a && b) {
-            mode = 2;
-          }
-
-          if (mode != -1) {
-            id(switch_audio_output).execute(mode);
-          }
+      - if:
+          condition:
+            lambda: |-
+              return id(sendspin_media_player).state == media_player::MEDIA_PLAYER_STATE_PLAYING && id(tag_is_present);
+          then:
+            - fan.turn_on:
+                id: mtr_tape
+                direction: FORWARD
+                speed: 40
+            - delay: 5s
+            - fan.turn_off:
+                id: mtr_tape
+          else:
+            - fan.turn_off:
+                id: mtr_tape

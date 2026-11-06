@@ -79,11 +79,14 @@ action:
             target:
               entity_id: media_player.jazzette
 
-      # When the tag is removed: pause playback immediately (like ejecting a cassette)
+      # When the tag is removed: pause playback and clear the queue (like ejecting a cassette)
       - conditions:
           - condition: trigger
             id: tag_removed
         sequence:
           - action: media_player.media_pause
+            target:
+              entity_id: media_player.jazzette
+          - action: media_player.clear_playlist
             target:
               entity_id: media_player.jazzette
